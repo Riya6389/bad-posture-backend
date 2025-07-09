@@ -35,68 +35,87 @@ def hello():
 
 @app.route('/analyze', methods=['POST'])
 def analyze_posture():
-    if 'video' not in request.files:
-        return jsonify({'feedback': 'No video uploaded'}), 400
+    # Check if a video is uploaded
+    if 'video' in request.files:
+        video_file = request.files['video']
+        temp_video_path = os.path.join(tempfile.gettempdir(), video_file.filename)
+        video_file.save(temp_video_path)
 
-    video_file = request.files['video']
-    temp_video_path = os.path.join(tempfile.gettempdir(), video_file.filename)
-    video_file.save(temp_video_path)
+        cap = cv2.VideoCapture(temp_video_path)
+        frame_count = 0
+        bad_posture_count = 0
 
-    cap = cv2.VideoCapture(temp_video_path)
-    frame_count = 0
-    bad_posture_count = 0
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
 
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if not ret:
-            break
+            frame_count += 1
+            image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = pose.process(image)
 
-        frame_count += 1
+            if results.pose_landmarks:
+                landmarks = results.pose_landmarks.landmark
+                left_hip = landmarks[mp_pose.PoseLandmark.LEFT_HIP]
+                left_knee = landmarks[mp_pose.PoseLandmark.LEFT_KNEE]
+                left_ankle = landmarks[mp_pose.PoseLandmark.LEFT_ANKLE]
+                left_shoulder = landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER]
+
+                a = (left_hip.x, left_hip.y)
+                b = (left_knee.x, left_knee.y)
+                c = (left_ankle.x, left_ankle.y)
+
+                knee_angle = calculate_angle(a, b, c)
+                back_angle = calculate_angle((left_shoulder.x, left_shoulder.y), (left_hip.x, left_hip.y), (left_ankle.x, left_ankle.y))
+
+                if left_knee.x > left_ankle.x or back_angle < 150:
+                    bad_posture_count += 1
+
+        cap.release()
+        os.remove(temp_video_path)
+
+        if bad_posture_count > 0:
+            feedback = f'Bad posture detected in {bad_posture_count} frames!'
+        else:
+            feedback = 'Posture looks good!'
+
+        return jsonify({'feedback': feedback})
+
+    # Check if an image is uploaded (for webcam)
+    elif 'file' in request.files:
+        image_file = request.files['file']
+        file_bytes = image_file.read()
+        np_arr = np.frombuffer(file_bytes, np.uint8)
+        frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+
         image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = pose.process(image)
 
         if results.pose_landmarks:
             landmarks = results.pose_landmarks.landmark
-
-            # Get needed joints
             left_hip = landmarks[mp_pose.PoseLandmark.LEFT_HIP]
             left_knee = landmarks[mp_pose.PoseLandmark.LEFT_KNEE]
             left_ankle = landmarks[mp_pose.PoseLandmark.LEFT_ANKLE]
             left_shoulder = landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER]
 
-            # Convert normalized landmarks to (x, y)
             a = (left_hip.x, left_hip.y)
             b = (left_knee.x, left_knee.y)
             c = (left_ankle.x, left_ankle.y)
 
-            # Calculate knee angle
             knee_angle = calculate_angle(a, b, c)
+            back_angle = calculate_angle((left_shoulder.x, left_shoulder.y), (left_hip.x, left_hip.y), (left_ankle.x, left_ankle.y))
 
-            # Check for squat back angle (shoulder-hip-ankle)
-            back_angle = calculate_angle(
-                (left_shoulder.x, left_shoulder.y),
-                (left_hip.x, left_hip.y),
-                (left_ankle.x, left_ankle.y)
-            )
+            if left_knee.x > left_ankle.x or back_angle < 150:
+                feedback = 'Bad posture detected!'
+            else:
+                feedback = 'Posture looks good!'
+        else:
+            feedback = 'No person detected.'
 
-            # Rule 1: Knee ahead of toe
-            if left_knee.x > left_ankle.x:
-                bad_posture_count += 1
+        return jsonify({'result': feedback})
 
-            # Rule 2: Back too bent
-            if back_angle < 150:
-                bad_posture_count += 1
-
-    cap.release()
-    os.remove(temp_video_path)
-
-    if bad_posture_count > 0:
-        feedback = f'Bad posture detected in {bad_posture_count} frames!'
     else:
-        feedback = 'Posture looks good!'
-
-    return jsonify({'feedback': feedback})
-
+        return jsonify({'feedback': 'No file uploaded'}), 400
 
     
 
