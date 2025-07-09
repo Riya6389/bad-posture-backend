@@ -1,5 +1,6 @@
-flask
-flask-cors
+flask==3.0.0
+flask-cors==4.0.0
 opencv-python==4.7.0.72
-mediapipe==0.10.7
+mediapipe==0.10.20
+
 
